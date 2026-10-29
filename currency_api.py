@@ -2,21 +2,21 @@
 import requests
 
 
-API_BASE_URL = "https://api.frankfurter.dev/v2"
+RATEBRIDGE_API_ROOT = "https://api.frankfurter.dev/v2"
 
 
-def get_supported_currencies():
-    url = f"{API_BASE_URL}/currencies"
+def ratebridge_list_currencies():
+    endpoint = f"{RATEBRIDGE_API_ROOT}/currencies"
 
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(endpoint, timeout=10)
         response.raise_for_status()
 
-        data = response.json()
+        currency_items = response.json()
 
         return {
             item["iso_code"]: item["name"]
-            for item in data
+            for item in currency_items
             if "iso_code" in item and "name" in item
         }
 
@@ -24,36 +24,39 @@ def get_supported_currencies():
         requests.exceptions.RequestException,
         ValueError,
         KeyError,
-        TypeError
+        TypeError,
     ) as error:
-        print("Unable to retrieve supported currencies:", error)
+        print("Could not retrieve the currency list:", error)
         return None
 
 
-def get_exchange_rate(from_currency, to_currency):
-    from_currency = from_currency.strip().upper()
-    to_currency = to_currency.strip().upper()
+def ratebridge_fetch_pair_rate(source_code, target_code):
+    source_code = source_code.strip().upper()
+    target_code = target_code.strip().upper()
 
-    if from_currency == to_currency:
+    if source_code == target_code:
         return 1.0, "Same currency"
 
-    url = f"{API_BASE_URL}/rate/{from_currency}/{to_currency}"
+    endpoint = (
+        f"{RATEBRIDGE_API_ROOT}/rate/"
+        f"{source_code}/{target_code}"
+    )
 
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(endpoint, timeout=10)
         response.raise_for_status()
 
-        data = response.json()
+        rate_details = response.json()
 
-        exchange_rate = float(data["rate"])
-        rate_date = data.get("date", "Unknown")
+        rate_value = float(rate_details["rate"])
+        reference_date = rate_details.get("date", "Unknown")
 
-        return exchange_rate, rate_date
+        return rate_value, reference_date
 
     except requests.exceptions.RequestException as error:
-        print("Unable to retrieve exchange rates:", error)
+        print("Could not retrieve the exchange rate:", error)
 
     except (ValueError, KeyError, TypeError):
-        print("Invalid response received from the currency API.")
+        print("The API returned an unexpected exchange-rate response.")
 
     return None, None

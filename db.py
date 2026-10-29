@@ -5,20 +5,20 @@ import mysql.connector
 from mysql.connector import Error
 
 
-def connect_database():
+def open_ratebridge_store():
+    password_value = os.getenv("MYSQL_PASSWORD")
+
+    if not password_value:
+        print("MySQL password is not configured.")
+        print("Set the MYSQL_PASSWORD environment variable.")
+        return None
+
     try:
-        password = os.getenv("MYSQL_PASSWORD")
-
-        if not password:
-            print("MySQL password not found.")
-            print("Please set the MYSQL_PASSWORD environment variable.")
-            return None
-
         connection = mysql.connector.connect(
             host="localhost",
             user="root",
-            password=password,
-            database="currency_converter"
+            password=password_value,
+            database="currency_converter",
         )
 
         if connection.is_connected():
@@ -27,6 +27,6 @@ def connect_database():
         connection.close()
 
     except Error as error:
-        print("Database connection failed:", error)
+        print("Could not connect to the conversion database:", error)
 
     return None
