@@ -1,4 +1,6 @@
 
+import math
+
 import requests
 
 
@@ -14,10 +16,15 @@ def ratebridge_list_currencies():
 
         currency_items = response.json()
 
+        if not isinstance(currency_items, list):
+            raise ValueError("Unexpected currency-list format.")
+
         return {
             item["iso_code"]: item["name"]
             for item in currency_items
-            if "iso_code" in item and "name" in item
+            if isinstance(item, dict)
+            and "iso_code" in item
+            and "name" in item
         }
 
     except (
@@ -48,7 +55,14 @@ def ratebridge_fetch_pair_rate(source_code, target_code):
 
         rate_details = response.json()
 
+        if not isinstance(rate_details, dict):
+            raise ValueError("Unexpected exchange-rate response.")
+
         rate_value = float(rate_details["rate"])
+
+        if not math.isfinite(rate_value) or rate_value <= 0:
+            raise ValueError("Invalid exchange-rate value.")
+
         reference_date = rate_details.get("date", "Unknown")
 
         return rate_value, reference_date
@@ -56,7 +70,7 @@ def ratebridge_fetch_pair_rate(source_code, target_code):
     except requests.exceptions.RequestException as error:
         print("Could not retrieve the exchange rate:", error)
 
-    except (ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError, OverflowError):
         print("The API returned an unexpected exchange-rate response.")
 
     return None, None

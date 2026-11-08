@@ -8,194 +8,217 @@ from currency_api import (
 from db import open_ratebridge_store
 
 
-def ratebridge_read_amount():
+def rb_app_capture_amount():
     while True:
         try:
-            amount = Decimal(input("\nAmount to convert: ").strip())
+            entered_amount = Decimal(
+                input("\nEnter the amount to convert: ").strip()
+            )
 
-            if not amount.is_finite() or amount <= 0:
-                print("Enter a positive, finite amount.")
+            if not entered_amount.is_finite() or entered_amount <= 0:
+                print("Please enter a valid positive amount.")
                 continue
 
-            return amount
+            return entered_amount
 
         except InvalidOperation:
-            print("Invalid amount. Enter a numeric value.")
+            print("Invalid input. Please enter a numeric amount.")
 
 
-def ratebridge_select_currency(prompt, currency_catalog):
+def rb_app_choose_currency(message, available_currencies):
     while True:
-        currency_code = input(prompt).strip().upper()
+        selected_code = input(message).strip().upper()
 
-        if currency_code not in currency_catalog:
-            print("Currency code not found. Please try again.")
+        if selected_code not in available_currencies:
+            print("Unsupported currency code. Please try again.")
             continue
 
-        print(
-            f"Currency selected: {currency_catalog[currency_code]} "
-            f"({currency_code})"
-        )
-        return currency_code
+        currency_name = available_currencies[selected_code]
+
+        print(f"Selected currency: {currency_name} ({selected_code})")
+
+        return selected_code
 
 
-def ratebridge_record_conversion(
-    source_code,
-    target_code,
-    source_amount,
-    rate_value,
-    target_amount,
+def rb_app_store_conversion(
+    source_currency,
+    destination_currency,
+    original_amount,
+    exchange_rate,
+    final_amount,
 ):
-    connection = open_ratebridge_store()
+    database_connection = open_ratebridge_store()
 
-    if connection is None:
-        print("Result calculated, but the history could not be saved.")
+    if database_connection is None:
+        print("Conversion completed, but the record could not be saved.")
         return
 
-    cursor = None
+    database_cursor = None
 
     try:
-        cursor = connection.cursor()
+        database_cursor = database_connection.cursor()
 
-        statement = """
+        insert_query = """
             INSERT INTO conversion_history
-            (from_currency, to_currency, amount, exchange_rate, converted_amount)
+            (
+                from_currency,
+                to_currency,
+                amount,
+                exchange_rate,
+                converted_amount
+            )
             VALUES (%s, %s, %s, %s, %s)
         """
 
-        cursor.execute(
-            statement,
-            (
-                source_code,
-                target_code,
-                source_amount,
-                rate_value,
-                target_amount,
-            ),
+        conversion_values = (
+            source_currency,
+            destination_currency,
+            original_amount,
+            exchange_rate,
+            final_amount,
         )
 
-        connection.commit()
-        print("Conversion record saved.")
+        database_cursor.execute(insert_query, conversion_values)
+        database_connection.commit()
 
-    except Exception as error:
-        connection.rollback()
-        print("Unable to save the conversion record:", error)
+        print("Conversion record saved successfully.")
+
+    except Exception as database_error:
+        database_connection.rollback()
+        print("Database error while saving the record:", database_error)
 
     finally:
-        if cursor is not None:
-            cursor.close()
+        if database_cursor is not None:
+            database_cursor.close()
 
-        connection.close()
+        database_connection.close()
 
 
-def ratebridge_convert():
+def rb_app_process_conversion():
     print("\n" + "=" * 42)
     print("           RATEBRIDGE CONVERTER")
     print("=" * 42)
 
-    currency_catalog = ratebridge_list_currencies()
+    currency_options = ratebridge_list_currencies()
 
-    if currency_catalog is None:
-        print("Currency information is unavailable. Check your connection.")
+    if currency_options is None:
+        print("Unable to retrieve currency information.")
+        print("Please check your internet connection.")
         return
 
-    source_amount = ratebridge_read_amount()
+    original_amount = rb_app_capture_amount()
 
-    source_code = ratebridge_select_currency(
-        "Source currency code (e.g. INR): ",
-        currency_catalog,
+    source_currency = rb_app_choose_currency(
+        "Enter source currency code (e.g. INR): ",
+        currency_options,
     )
 
-    target_code = ratebridge_select_currency(
-        "Target currency code (e.g. SGD): ",
-        currency_catalog,
+    destination_currency = rb_app_choose_currency(
+        "Enter target currency code (e.g. USD): ",
+        currency_options,
     )
 
-    rate_value, reference_date = ratebridge_fetch_pair_rate(
-        source_code,
-        target_code,
+    exchange_rate, rate_date = ratebridge_fetch_pair_rate(
+        source_currency,
+        destination_currency,
     )
 
-    if rate_value is None:
-        print("The conversion could not be completed.")
+    if exchange_rate is None:
+        print("Unable to complete the requested conversion.")
         return
 
-    target_amount = (
-        source_amount * Decimal(str(rate_value))
+    final_amount = (
+        original_amount * Decimal(str(exchange_rate))
     ).quantize(Decimal("0.01"))
 
     print("\n" + "-" * 42)
     print("             CONVERSION RESULT")
     print("-" * 42)
-    print(f"Original amount: {source_amount} {source_code}")
-    print(f"Converted value: {target_amount} {target_code}")
-    print(f"Rate:            1 {source_code} = {rate_value} {target_code}")
-    print(f"Rate reference:  {reference_date}")
+    print(f"Original amount: {original_amount} {source_currency}")
+    print(f"Converted value: {final_amount} {destination_currency}")
+    print(
+        f"Exchange rate:   1 {source_currency} = "
+        f"{exchange_rate} {destination_currency}"
+    )
+    print(f"Reference date:  {rate_date}")
     print("-" * 42)
 
-    ratebridge_record_conversion(
-        source_code,
-        target_code,
-        source_amount,
-        rate_value,
-        target_amount,
+    rb_app_store_conversion(
+        source_currency,
+        destination_currency,
+        original_amount,
+        exchange_rate,
+        final_amount,
     )
 
 
-def ratebridge_show_history():
-    connection = open_ratebridge_store()
+def rb_app_display_history():
+    database_connection = open_ratebridge_store()
 
-    if connection is None:
-        print("Cannot access conversion history.")
+    if database_connection is None:
+        print("Unable to access the conversion history.")
         return
 
-    cursor = None
+    database_cursor = None
 
     try:
-        cursor = connection.cursor()
+        database_cursor = database_connection.cursor()
 
-        cursor.execute("""
-            SELECT id, from_currency, to_currency, amount,
-                   exchange_rate, converted_amount, converted_at
+        history_query = """
+            SELECT
+                id,
+                from_currency,
+                to_currency,
+                amount,
+                exchange_rate,
+                converted_amount,
+                converted_at
             FROM conversion_history
             ORDER BY converted_at DESC, id DESC
-        """)
+        """
 
-        history_rows = cursor.fetchall()
+        database_cursor.execute(history_query)
+        saved_conversions = database_cursor.fetchall()
 
         print("\n" + "=" * 108)
-        print("                    RATEBRIDGE CONVERSION RECORDS")
+        print("                  RATEBRIDGE CONVERSION HISTORY")
         print("=" * 108)
 
-        if not history_rows:
-            print("No saved conversions are available.")
+        if not saved_conversions:
+            print("No conversion records found.")
             return
 
         print(
             f"{'ID':<5} {'FROM':<8} {'TO':<8} {'AMOUNT':<14} "
             f"{'RATE':<18} {'RESULT':<14} {'RECORDED AT':<22}"
         )
+
         print("-" * 108)
 
-        for row in history_rows:
+        for conversion in saved_conversions:
             print(
-                f"{row[0]:<5} {row[1]:<8} {row[2]:<8} "
-                f"{str(row[3]):<14} {str(row[4]):<18} "
-                f"{str(row[5]):<14} {str(row[6]):<22}"
+                f"{conversion[0]:<5} "
+                f"{conversion[1]:<8} "
+                f"{conversion[2]:<8} "
+                f"{str(conversion[3]):<14} "
+                f"{str(conversion[4]):<18} "
+                f"{str(conversion[5]):<14} "
+                f"{str(conversion[6]):<22}"
             )
 
         print("=" * 108)
 
-    except Exception as error:
-        print("Unable to load saved conversions:", error)
+    except Exception as history_error:
+        print("Unable to retrieve conversion history:", history_error)
 
     finally:
-        if cursor is not None:
-            cursor.close()
+        if database_cursor is not None:
+            database_cursor.close()
 
-        connection.close()
+        database_connection.close()
 
 
-def ratebridge_launch():
+def rb_app_start_console():
     while True:
         print("\n" + "=" * 42)
         print("              RATEBRIDGE")
@@ -204,17 +227,21 @@ def ratebridge_launch():
         print("2. Review conversion records")
         print("3. Close application")
 
-        selection = input("\nChoose an option (1-3): ").strip()
+        menu_choice = input("\nChoose an option (1-3): ").strip()
 
-        if selection == "1":
-            ratebridge_convert()
-        elif selection == "2":
-            ratebridge_show_history()
-        elif selection == "3":
-            print("RateBridge session ended.")
+        if menu_choice == "1":
+            rb_app_process_conversion()
+
+        elif menu_choice == "2":
+            rb_app_display_history()
+
+        elif menu_choice == "3":
+            print("Thank you for using RateBridge. Goodbye!")
             break
+
         else:
-            print("Invalid selection. Choose 1, 2, or 3.")
+            print("Invalid choice. Please select 1, 2, or 3.")
 
 
-ratebridge_launch()
+if __name__ == "__main__":
+    rb_app_start_console()
